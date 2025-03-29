@@ -5,19 +5,22 @@ export class MainScene extends Phaser.Scene {
   path!: Phaser.Curves.Path;
   towerCount: number = 0; // Counter for tower numbering
   points: number = 0;
-  pointsLog: number = 0;
+  pointsLog: number = 1;
   nextPointsLog: number = 50;
   start: Date = new Date();
-  hp: number = 10000;
+  hp: number = 100;
   nextSpawn: Date = new Date();
   enemySpawnCount: number = 0; // Counter for enemies spawned
   enemyCountText!: Phaser.GameObjects.Text;
+  gold: number = 300; // pointer minus everything used for towers, but starts with 300 for the first few towers
+  goldText!: Phaser.GameObjects.Text;
   hpText!: Phaser.GameObjects.Text;
   pointsText!: Phaser.GameObjects.Text;
   castles!: Phaser.GameObjects.Group;
   readonly castleX: number = 50;
   readonly castleY: number = 500;
   castleLabel!: Phaser.GameObjects.Text;
+  spawnEvent!: Phaser.Time.TimerEvent;
 
   constructor() {
     super({ key: "MainScene" });
@@ -91,10 +94,15 @@ export class MainScene extends Phaser.Scene {
       }
     );
     this.pointsText.setOrigin(0.5, 0);
+    this.goldText = this.add.text(80, 10, `Gold: ${this.gold}`, {
+      fontSize: "20px",
+      color: "#ffffff",
+    });
+    this.goldText.setOrigin(0.5, 0);
     this.hpText = this.add.text(
       this.cameras.main.centerX + 150,
       this.cameras.main.centerY * 2 - 40,
-      "Health of the Castle: 0",
+      "Health of the Castle: " + this.hp,
       {
         fontSize: "20px",
         color: "#ffffff",
@@ -103,8 +111,8 @@ export class MainScene extends Phaser.Scene {
     this.hpText.setOrigin(0.5, 0);
 
     // Spawn an enemy every 2 seconds.
-    this.time.addEvent({
-      delay: 50,
+    this.spawnEvent = this.time.addEvent({
+      delay: 80,
       callback: this.potentiallySpawn,
       callbackScope: this,
       loop: true,
@@ -118,10 +126,10 @@ export class MainScene extends Phaser.Scene {
     if (new Date() > this.nextSpawn) {
       if (this.points > this.nextPointsLog) {
         this.pointsLog = 0.9 * this.pointsLog;
-        this.nextPointsLog = this.nextPointsLog * 10;
+        this.nextPointsLog = this.nextPointsLog * 1.5;
       }
       this.nextSpawn = new Date(
-        Date.now() + (Math.random() * 200 + 1800 * this.pointsLog)
+        Date.now() + (Math.random() * 100 + 1800 * this.pointsLog)
       );
       this.spawnEnemy();
     }
@@ -163,6 +171,10 @@ export class MainScene extends Phaser.Scene {
   }
 
   private placeTower(pointer: Phaser.Input.Pointer) {
+    if (this.gold < 100) {
+      return;
+    }
+    this.gold -= 100;
     // Increment tower counter and create a tower sprite at the clicked position.
     this.towerCount++;
     const tower = this.add.sprite(pointer.x, pointer.y, "tower");
@@ -212,19 +224,52 @@ export class MainScene extends Phaser.Scene {
       }
     });
 
-    // Check for collisions between bullets and enemies.
+    // Check for collisions between bullets and enemies using swept collision.
     this.bullets.getChildren().forEach((obj) => {
       const bullet = obj as Phaser.GameObjects.Sprite;
       if (!bullet.active) return;
+
+      // Get the bullet's previous position (if not set, default to its current position).
+      const prevX: number = bullet.getData("prevX") ?? bullet.x;
+      const prevY: number = bullet.getData("prevY") ?? bullet.y;
+
+      // For each enemy, check if its center is near the line segment from the bullet's previous to current position.
       this.enemies.getChildren().forEach((eObj) => {
         const enemy = eObj as Phaser.GameObjects.Sprite;
-        if (
-          Phaser.Math.Distance.Between(bullet.x, bullet.y, enemy.x, enemy.y) <
-          10
-        ) {
+        const px = enemy.x,
+          py = enemy.y;
+        const ax = prevX,
+          ay = prevY;
+        const bx = bullet.x,
+          by = bullet.y;
+
+        // Compute the projection factor t of point P onto segment AB.
+        const abx = bx - ax;
+        const aby = by - ay;
+        const abSquared = abx * abx + aby * aby;
+        // Avoid division by zero.
+        if (abSquared === 0) return;
+        const apx = px - ax;
+        const apy = py - ay;
+        let t = (apx * abx + apy * aby) / abSquared;
+        t = Phaser.Math.Clamp(t, 0, 1);
+
+        // Find the closest point on the segment.
+        const closestX = ax + t * abx;
+        const closestY = ay + t * aby;
+
+        // Compute the distance from the enemy to the closest point.
+        const dist = Phaser.Math.Distance.Between(px, py, closestX, closestY);
+
+        // If within hit radius (e.g., 10 pixels), consider it a hit.
+        if (dist < 10) {
           this.enemyKilled(bullet, enemy);
         }
       });
+
+      // Store current bullet position for swept collision in the next update.
+      bullet.setData("prevX", bullet.x);
+      bullet.setData("prevY", bullet.y);
     });
 
     this.enemies.getChildren().forEach((eObj) => {
@@ -265,9 +310,17 @@ export class MainScene extends Phaser.Scene {
     this.castleLabel.setText(`${this.hp}`);
     this.hpText.setText(`Health of the Castle: ${this.hp}`);
   }
-  gameOver() {
+  private gameOver() {
     //TODO: implement
-    alert("Game Over");
+    this.spawnEvent.destroy();
+    console.log("Game Over at " + this.hp);
+    if (
+      confirm(
+        "Game Over, with points: " + this.points + "\nPress to reload page"
+      )
+    ) {
+      window.location.reload();
+    }
   }
 
   private enemyKilled(
@@ -285,6 +338,8 @@ export class MainScene extends Phaser.Scene {
     enemy.destroy();
     this.points += score;
     this.pointsText.setText(`Points: ${this.points}`);
+    this.gold += score;
+    this.goldText.setText(`Gold: ${this.gold}`);
   }
 
   private getEnemyInRange(
@@ -304,6 +359,10 @@ export class MainScene extends Phaser.Scene {
     return null;
   }
 
+  private getSpeedOfEnemy(enemy: Phaser.GameObjects.Sprite) {
+    return 180; // Based on the enemy's path duration and length. (1800px in 10s)
+  }
+
   private fireBullet(
     tower: Phaser.GameObjects.Sprite,
     enemy: Phaser.GameObjects.Sprite
@@ -312,8 +371,65 @@ export class MainScene extends Phaser.Scene {
     const bullet = this.add.sprite(tower.x, tower.y, "bullet");
     this.physics.add.existing(bullet);
 
-    // Move the bullet toward the enemy.
-    this.physics.moveTo(bullet, enemy.x, enemy.y, 500);
+    // Define speeds.
+    const bulletSpeed = 800;
+    const enemySpeed = this.getSpeedOfEnemy(enemy);
+
+    // Compute the difference vector from the tower to the enemy.
+    const deltaX = enemy.x - tower.x;
+    const deltaY = enemy.y - tower.y;
+
+    // Determine enemy's velocity using its rotation (which aligns with its path direction).
+    const angle = enemy.rotation; // In radians.
+    const vEx = Math.cos(angle) * enemySpeed;
+    const vEy = Math.sin(angle) * enemySpeed;
+
+    // Solve for time T such that:
+    // || (deltaX, deltaY) + (vEx, vEy)*T || = bulletSpeed * T
+    // This gives a quadratic equation: A*T^2 + B*T + C = 0.
+    const A = vEx * vEx + vEy * vEy - bulletSpeed * bulletSpeed;
+    const B = 2 * (deltaX * vEx + deltaY * vEy);
+    const C = deltaX * deltaX + deltaY * deltaY;
+
+    let T = 0;
+    const discriminant = B * B - 4 * A * C;
+    if (discriminant >= 0) {
+      const sqrtDisc = Math.sqrt(discriminant);
+      const t1 = (-B + sqrtDisc) / (2 * A);
+      const t2 = (-B - sqrtDisc) / (2 * A);
+      // Choose the smallest positive time.
+      T = Math.min(t1, t2);
+      if (T < 0) {
+        T = Math.max(t1, t2);
+      }
+      if (T < 0) {
+        T = 0;
+      }
+    } else {
+      // If no solution, fallback to aiming directly at the current enemy position.
+      T = 0;
+    }
+
+    // Compute the predicted enemy position at time T.
+    const interceptX = enemy.x + vEx * T;
+    const interceptY = enemy.y + vEy * T;
+
+    // Compute the direction vector from the tower to the intercept point.
+    const dirX = interceptX - tower.x;
+    const dirY = interceptY - tower.y;
+    const mag = Math.sqrt(dirX * dirX + dirY * dirY);
+    const unitX = dirX / mag;
+    const unitY = dirY / mag;
+
+    // Compute the angle for the bullet.
+    const bulletAngle = Math.atan2(unitY, unitX);
+
+    // Set the bullet's velocity in that direction.
+    this.physics.velocityFromRotation(
+      bulletAngle,
+      bulletSpeed,
+      (bullet.body as Phaser.Physics.Arcade.Body).velocity
+    );
     this.bullets.add(bullet);
 
     // Destroy the bullet after 2 seconds if it doesn't hit.

@@ -1,0 +1,25 @@
+- There are three types of towers:
+  - One Towers 
+    - a bullet from these destroys a one enemy in one shot 
+    - other enemies take one damage from such a shot
+    - the AI prioritizes close targets with a value of 1
+  - Prime Towers
+    - a tower can be upgraded from existing one towers
+    - it now shoots prime factors, but only at enemies that have them
+    - it removes that factor from the enemies value, e.g. a 4 enemy needs to be shot twice by a 2 prime tower, and finally killed by one further 1 tower to be destroyed
+  - Effects towers
+    - Do not deal damage, but do cause special effects
+    - slow tower (decreases speed to enemy)
+    - gold tower (increases the gold score of hit enemies)
+    - traitor tower (will shoot prime enemies and add 1)
+    - return tower (shoots rarely, but causes enemy to move back a little bit)
+- building or upgrading a tower opens a menu
+  - building one tower only takes confirmation
+  - upgrading or scraping a tower has a selection available
+  - gray out options that are currently too expensive
+- pause button to pause the game
+- game can be saved to localstorage
+- game can be auto-load from save game to enable fast iteration
+- towers should not be placed within the path or each other or the castle
+- the path should be drawn from a global seed
+- global seed stored in URL fragment for reuse
