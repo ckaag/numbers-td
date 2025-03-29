@@ -481,6 +481,10 @@ export class MainScene extends Phaser.Scene {
     allEnemies: Enemy[]
   ) {
     const hitEffect = bullet.getData("hitEffect") as HitEffect;
+    if (!hitEffect) {
+      console.warn({ noHitEffectFoundFor: bullet });
+      return;
+    }
     if (hitEffect(enemy, allEnemies)) {
       // destroy bullet
       bullet.destroy();
