@@ -5,6 +5,8 @@ export class MainScene extends Phaser.Scene {
   path!: Phaser.Curves.Path;
   towerCount: number = 0; // Counter for tower numbering
   points: number = 0;
+  pointsLog: number = 0;
+  nextPointsLog: number = 50;
   start: Date = new Date();
   hp: number = 10000;
   nextSpawn: Date = new Date();
@@ -114,8 +116,12 @@ export class MainScene extends Phaser.Scene {
 
   private potentiallySpawn() {
     if (new Date() > this.nextSpawn) {
+      if (this.points > this.nextPointsLog) {
+        this.pointsLog = 0.9 * this.pointsLog;
+        this.nextPointsLog = this.nextPointsLog * 10;
+      }
       this.nextSpawn = new Date(
-        Date.now() + (Math.random() * 200 + 1800 * Math.pow(0.99, this.points))
+        Date.now() + (Math.random() * 200 + 1800 * this.pointsLog)
       );
       this.spawnEnemy();
     }
@@ -307,12 +313,12 @@ export class MainScene extends Phaser.Scene {
     this.physics.add.existing(bullet);
 
     // Move the bullet toward the enemy.
-    this.physics.moveTo(bullet, enemy.x, enemy.y, 300);
+    this.physics.moveTo(bullet, enemy.x, enemy.y, 500);
     this.bullets.add(bullet);
 
     // Destroy the bullet after 2 seconds if it doesn't hit.
     this.time.addEvent({
-      delay: 2000,
+      delay: 1500,
       callback: () => bullet.destroy(),
     });
   }
