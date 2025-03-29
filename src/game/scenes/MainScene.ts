@@ -9,7 +9,8 @@ export class MainScene extends Phaser.Scene {
   nextPointsLog: number = 50;
   start: Date = new Date();
   hp: number = 100;
-  nextSpawn: Date = new Date();
+  nextSpawn: Date = new Date(Date.now() + 5000);
+  blockBuildMenuUntil: Date = new Date();
   enemySpawnCount: number = 0; // Counter for enemies spawned
   enemyCountText!: Phaser.GameObjects.Text;
   gold: number = 300; // pointer minus everything used for towers, but starts with 300 for the first few towers
@@ -21,6 +22,10 @@ export class MainScene extends Phaser.Scene {
   readonly castleY: number = 500;
   castleLabel!: Phaser.GameObjects.Text;
   spawnEvent!: Phaser.Time.TimerEvent;
+  buildButton: Phaser.GameObjects.Text;
+  towerInfo: Phaser.GameObjects.Text;
+  cancelButton: Phaser.GameObjects.Text;
+  readonly pointsPerScoreLevel = 100;
 
   constructor() {
     super({ key: "MainScene" });
@@ -112,7 +117,7 @@ export class MainScene extends Phaser.Scene {
 
     // Spawn an enemy every 2 seconds.
     this.spawnEvent = this.time.addEvent({
-      delay: 80,
+      delay: 50,
       callback: this.potentiallySpawn,
       callbackScope: this,
       loop: true,
@@ -129,7 +134,7 @@ export class MainScene extends Phaser.Scene {
         this.nextPointsLog = this.nextPointsLog * 1.5;
       }
       this.nextSpawn = new Date(
-        Date.now() + (Math.random() * 100 + 1800 * this.pointsLog)
+        Date.now() + (Math.random() * 100 + 1000 * this.pointsLog)
       );
       this.spawnEnemy();
     }
@@ -163,41 +168,155 @@ export class MainScene extends Phaser.Scene {
     // Save the label as custom data on the enemy so we can update or remove it later.
     enemy.setData("label", enemyLabel);
     enemy.setData("score", score);
+    enemy.setData("hp", score); // we start with hp equal to score
   }
   private getRandomEnemyScoreFromPoints(points: number) {
     const min = 1;
-    const max = Math.ceil(points / 50);
+    const max = Math.ceil(points / this.pointsPerScoreLevel);
     return Math.floor(Math.random() * max) + min;
   }
 
   private placeTower(pointer: Phaser.Input.Pointer) {
+    if (this.blockBuildMenuUntil > new Date()) {
+      return;
+    }
+    // Only open a popup if one isn't already showing.
+    if (
+      this.children.list.some(
+        (child) => child.getData && child.getData("isPopup")
+      )
+    ) {
+      return;
+    }
+
+    // Check if clicking an existing tower.
+    const clickedTower = this.towers
+      .getChildren()
+      .find(
+        (tower) =>
+          Phaser.Math.Distance.Between(
+            pointer.x,
+            pointer.y,
+            (tower as Phaser.GameObjects.Sprite).x,
+            (tower as Phaser.GameObjects.Sprite).y
+          ) < 16
+      ) as Phaser.GameObjects.Sprite | undefined;
+
+    // Create popup background.
+    const popup = this.add
+      .rectangle(pointer.x, pointer.y, 120, 60, 0x000000, 0.8)
+      .setOrigin(0.5, 0.5)
+      .setDepth(10)
+      .setData("isPopup", true);
+
+    // If a tower was clicked, show its number.
+    if (clickedTower) {
+      const towerNumber = clickedTower.getData("towerNumber");
+      const towerInfo = this.add
+        .text(pointer.x, pointer.y - 10, `Tower #${towerNumber}`, {
+          fontSize: "16px",
+          color: "#ffffff",
+        })
+        .setOrigin(0.5, 0.5)
+        .setDepth(11)
+        .setData("isPopup", true);
+      this.towerInfo = towerInfo;
+    } else {
+      // Show 'Build a Tower' button for empty space clicks.
+      const buildButton = this.add
+        .text(pointer.x, pointer.y - 10, "Build a Tower", {
+          fontSize: "16px",
+          color: "#ffffff",
+        })
+        .setOrigin(0.5, 0.5)
+        .setDepth(11)
+        .setInteractive()
+        .setData("isPopup", true);
+
+      buildButton.on("pointerdown", () => {
+        this.buildTower(pointer.x, pointer.y);
+        this.closePopup();
+      });
+      this.buildButton = buildButton;
+    }
+
+    // Create the cancel button.
+    const cancelButton = this.add
+      .text(pointer.x, pointer.y + 15, "Cancel", {
+        fontSize: "16px",
+        color: "#ff4444",
+      })
+      .setOrigin(0.5, 0.5)
+      .setDepth(11)
+      .setInteractive()
+      .setData("isPopup", true);
+    this.cancelButton = cancelButton;
+
+    cancelButton.on("pointerdown", () => {
+      this.closePopup();
+    });
+
+    // Set up an outside click handler.
+    // Note: Using input.on here instead of once so we can re‑attach it when needed.
+    // this.input.on("pointerdown", this.outsideClickHandler, this);
+    // Handle clicking outside the popup as a cancel action.
+    // Delay setting the outside click event to avoid closing instantly.
+    this.time.delayedCall(50, () => {
+      this.input.once("pointerdown", this.outsideClickHandler, this);
+    });
+  }
+
+  // Function to build a tower.
+  buildTower(x: number, y: number) {
+    this.towerCount++;
+    const tower = this.add.sprite(x, y, "tower").setInteractive();
+    tower.setData("towerNumber", this.towerCount);
     if (this.gold < 100) {
       return;
     }
     this.gold -= 100;
-    // Increment tower counter and create a tower sprite at the clicked position.
-    this.towerCount++;
-    const tower = this.add.sprite(pointer.x, pointer.y, "tower");
-    tower.setInteractive();
+    tower.setData("range", 250);
+    tower.setData("fireRate", 700); // milliseconds
+    tower.setData("lastFired", 0);
     this.towers.add(tower);
 
-    // Set custom properties for the tower.
-    tower.setData("range", 150);
-    tower.setData("fireRate", 1000); // milliseconds
-    tower.setData("lastFired", 0);
-
-    // Add the incrementing number as a text label on top of the tower.
-    const towerLabel = this.add.text(
-      pointer.x,
-      pointer.y,
-      `${this.towerCount}`,
-      {
-        fontSize: "16px",
-        color: "#ffffff",
-      }
-    );
-    towerLabel.setOrigin(0.5, 0.5);
+    // Add tower label.
+    this.add
+      .text(x, y, `${this.towerCount}`, { fontSize: "16px", color: "#ffffff" })
+      .setOrigin(0.5, 0.5)
+      .setDepth(11);
   }
+  outsideClickHandler(pointer: Phaser.Input.Pointer) {
+    // Check if the click is outside the popup area.
+    // For simplicity, if any popup exists and the click target is not one of its interactive children,
+    // we close the popup.
+    const popups = this.children.list.filter(
+      (child) => child.getData && child.getData("isPopup")
+    );
+    if (popups.length > 0) {
+      // Here you might add more logic to check if pointer is inside any popup bounds.
+      // For now, we simply close the popup.
+      this.closePopup();
+    }
+  }
+
+  // Function to close all popups.
+  closePopup() {
+    // Remove all popup-related children.
+    this.children.list.forEach((child) => {
+      if (child.getData && child.getData("isPopup")) {
+        child.destroy();
+      }
+    });
+    // Remove the outside click handler so it doesn't interfere with future clicks.
+    this.input.off("pointerdown", this.outsideClickHandler, this);
+
+    this.buildButton?.destroy();
+    this.towerInfo?.destroy();
+    this.cancelButton?.destroy();
+    this.blockBuildMenuUntil = new Date(Date.now() + 100);
+  }
+
   private placeCastle(x: number, y: number) {
     const castle = this.add.sprite(x, y, "castle");
     castle.setInteractive();
@@ -218,7 +337,9 @@ export class MainScene extends Phaser.Scene {
       if (time > tower.getData("lastFired") + tower.getData("fireRate")) {
         const enemy = this.getEnemyInRange(tower);
         if (enemy) {
-          this.fireBullet(tower, enemy);
+          this.fireBullet(tower, enemy, (single, all) => {
+            return defaultOneHit(tower, single, all);
+          });
           tower.setData("lastFired", time);
         }
       }
@@ -263,7 +384,7 @@ export class MainScene extends Phaser.Scene {
 
         // If within hit radius (e.g., 10 pixels), consider it a hit.
         if (dist < 10) {
-          this.enemyKilled(bullet, enemy);
+          this.enemyShot(bullet, enemy, this.enemies.getChildren() as Enemy[]);
         }
       });
 
@@ -294,6 +415,28 @@ export class MainScene extends Phaser.Scene {
         label.setPosition(enemy.x, enemy.y); // - enemy.height / 2);
       }
     });
+  }
+  private enemyShot(
+    bullet: Phaser.GameObjects.Sprite,
+    enemy: Enemy,
+    allEnemies: Enemy[]
+  ) {
+    const hitEffect = bullet.getData("hitEffect") as HitEffect;
+    if (hitEffect(enemy, allEnemies)) {
+      // destroy bullet
+      bullet.destroy();
+    }
+    const remainingLife = enemy.getData("hp") as number;
+    if (remainingLife > 0) {
+      this.enemyWeakened(enemy);
+    } else {
+      this.enemyKilled(bullet, enemy);
+    }
+  }
+  private enemyWeakened(enemy: Phaser.GameObjects.Sprite) {
+    const remainingLife = enemy.getData("hp") as number;
+    const label = enemy.getData("label") as Phaser.GameObjects.Text;
+    label.setText(`${remainingLife}`);
   }
   private enemyReachedCastle(enemy: Phaser.GameObjects.GameObject) {
     const value = 1;
@@ -334,7 +477,7 @@ export class MainScene extends Phaser.Scene {
     }
     const score = enemy.getData("score") as number;
 
-    bullet.destroy();
+    bullet?.destroy();
     enemy.destroy();
     this.points += score;
     this.pointsText.setText(`Points: ${this.points}`);
@@ -342,7 +485,7 @@ export class MainScene extends Phaser.Scene {
     this.goldText.setText(`Gold: ${this.gold}`);
   }
 
-  private getEnemyInRange(
+  public getEnemyInRange(
     tower: Phaser.GameObjects.Sprite
   ): Phaser.GameObjects.Sprite | null {
     const range = tower.getData("range");
@@ -363,9 +506,10 @@ export class MainScene extends Phaser.Scene {
     return 180; // Based on the enemy's path duration and length. (1800px in 10s)
   }
 
-  private fireBullet(
+  public fireBullet(
     tower: Phaser.GameObjects.Sprite,
-    enemy: Phaser.GameObjects.Sprite
+    enemy: Phaser.GameObjects.Sprite,
+    hitEffect: HitEffect
   ) {
     // Create a bullet at the tower's position.
     const bullet = this.add.sprite(tower.x, tower.y, "bullet");
@@ -431,6 +575,7 @@ export class MainScene extends Phaser.Scene {
       (bullet.body as Phaser.Physics.Arcade.Body).velocity
     );
     this.bullets.add(bullet);
+    bullet.setData("hitEffect", hitEffect);
 
     // Destroy the bullet after 2 seconds if it doesn't hit.
     this.time.addEvent({
@@ -438,4 +583,242 @@ export class MainScene extends Phaser.Scene {
       callback: () => bullet.destroy(),
     });
   }
+
+  towerType: Record<string, TowerTypeClass> = {
+    one: {
+      behavior: {
+        name: "One",
+        findFirstTargetOrUndefined: function (
+          enemies: Phaser.GameObjects.Sprite[],
+          tower: Phaser.GameObjects.Sprite
+        ): Phaser.GameObjects.Sprite | undefined {
+          return defaultOneTargetting(enemies, tower);
+        },
+        isReadyToFire: function (
+          time: number,
+          tower: Phaser.GameObjects.Sprite,
+          enemy: Phaser.GameObjects.Sprite
+        ): boolean {
+          return defaultFireReady(time, tower, enemy);
+        },
+        fireBullet: function (
+          scene: MainScene,
+          tower: Phaser.GameObjects.Sprite,
+          enemy: Phaser.GameObjects.Sprite,
+          conf: TowerShootModule
+        ): void {
+          defaultFireBullet(scene, tower, enemy, conf);
+        },
+        bulletHitEffect: function (
+          tower: Phaser.GameObjects.Sprite,
+          enemy: Phaser.GameObjects.Sprite,
+          otherEnemies: Phaser.GameObjects.Sprite[]
+        ): boolean {
+          return defaultOneHit(tower, enemy, otherEnemies);
+        },
+      },
+      upgrades: [
+        {
+          goldCost: 100,
+          targetShooter: () => this.towerType.two.behavior,
+          name: "Upgrade: 2-Factor",
+        },
+      ],
+    },
+    two: {
+      behavior: this.buildPrimeBehavior(2),
+      upgrades: [
+        {
+          goldCost: 25,
+          targetShooter: () => this.towerType.one.behavior,
+          name: "Downgrade to 1",
+        },
+        {
+          goldCost: 100,
+          targetShooter: () => this.towerType.three.behavior,
+          name: "Upgrade: 3-Factor",
+        },
+      ],
+    },
+    three: {
+      behavior: this.buildPrimeBehavior(3),
+      upgrades: [
+        {
+          goldCost: 25,
+          targetShooter: () => this.towerType.one.behavior,
+          name: "Downgrade to 1",
+        },
+        {
+          goldCost: 100,
+          targetShooter: () => this.towerType.five.behavior,
+          name: "Upgrade: 5-Factor",
+        },
+      ],
+    },
+    five: {
+      behavior: this.buildPrimeBehavior(5),
+      upgrades: [
+        {
+          goldCost: 25,
+          targetShooter: () => this.towerType.one.behavior,
+          name: "Downgrade to 1",
+        },
+      ],
+    },
+  };
+
+  buildPrimeBehavior(prime: number): TowerShootModule {
+    return {
+      name: prime + "-Prime-Factor",
+      findFirstTargetOrUndefined: function (
+        enemies: Phaser.GameObjects.Sprite[],
+        tower: Phaser.GameObjects.Sprite
+      ): Phaser.GameObjects.Sprite | undefined {
+        return defaultPrimeTargetting(prime, enemies, tower);
+      },
+      isReadyToFire: function (
+        time: number,
+        tower: Phaser.GameObjects.Sprite,
+        enemy: Phaser.GameObjects.Sprite
+      ): boolean {
+        return defaultFireReady(time, tower, enemy);
+      },
+      fireBullet: function (
+        scene: MainScene,
+        tower: Phaser.GameObjects.Sprite,
+        enemy: Phaser.GameObjects.Sprite,
+        conf: TowerShootModule
+      ): void {
+        defaultFireBullet(scene, tower, enemy, conf);
+      },
+      bulletHitEffect: function (
+        tower: Phaser.GameObjects.Sprite,
+        enemy: Phaser.GameObjects.Sprite,
+        otherEnemies: Phaser.GameObjects.Sprite[]
+      ): boolean {
+        return defaultPrimeHit(prime, tower, enemy, otherEnemies);
+      },
+    };
+  }
+}
+
+type Enemy = Phaser.GameObjects.Sprite;
+type Bullet = Phaser.GameObjects.Sprite;
+type Tower = Phaser.GameObjects.Sprite;
+
+function defaultOneHit(
+  tower: Phaser.GameObjects.Sprite,
+  enemy: Enemy,
+  otherEnemies: Enemy[]
+): boolean {
+  const hp = enemy.getData("hp");
+  const newHp = hp - 1;
+  enemy.setData("hp", newHp);
+  return true;
+}
+
+function defaultOneTargetting(
+  enemies: Enemy[],
+  tower: Phaser.GameObjects.Sprite
+): Enemy | undefined {
+  return defaultPrimeTargetting(1, enemies, tower);
+}
+
+type HitEffect = (enemy: Enemy, allEnemies: Enemy[]) => boolean;
+
+function defaultFireBullet(
+  scene: MainScene,
+  tower: Phaser.GameObjects.Sprite,
+  enemy: Phaser.GameObjects.Sprite,
+  conf: TowerShootModule
+): void {
+  scene.fireBullet(tower, enemy, (b, c) => conf.bulletHitEffect(tower, b, c));
+}
+
+function defaultFireReady(
+  time: number,
+  tower: Phaser.GameObjects.Sprite,
+  enemy: Phaser.GameObjects.Sprite
+): boolean {
+  return time > tower.getData("lastFired") + tower.getData("fireRate");
+}
+
+function defaultPrimeHit(
+  prime: number,
+  tower: Phaser.GameObjects.Sprite,
+  enemy: Phaser.GameObjects.Sprite,
+  otherEnemies: Phaser.GameObjects.Sprite[]
+): boolean {
+  const hp = enemy.getData("hp");
+  if (hp % prime !== 0) {
+    return false;
+  }
+  const newHp = Math.ceil(hp / prime);
+  enemy.setData("hp", newHp);
+  return true;
+}
+
+function defaultPrimeTargetting(
+  prime: number,
+  enemies: Phaser.GameObjects.Sprite[],
+  tower: Phaser.GameObjects.Sprite
+): Enemy | undefined {
+  const range = tower.getData("range");
+  const enemyArray = enemies;
+  for (let enemy of enemyArray) {
+    if (
+      scoreOfEnemyHasFactor(enemy, prime) &&
+      Phaser.Math.Distance.Between(tower.x, tower.y, enemy.x, enemy.y) <= range
+    ) {
+      return enemy;
+    }
+  }
+  return undefined;
+}
+
+type TowerShootModule = {
+  name: string;
+  findFirstTargetOrUndefined: (
+    enemies: Phaser.GameObjects.Sprite[],
+    tower: Phaser.GameObjects.Sprite
+  ) => Phaser.GameObjects.Sprite | undefined;
+  isReadyToFire: (
+    time: number,
+    tower: Phaser.GameObjects.Sprite,
+    enemy: Phaser.GameObjects.Sprite
+  ) => boolean;
+  fireBullet: (
+    scene: MainScene,
+    tower: Phaser.GameObjects.Sprite,
+    enemy: Phaser.GameObjects.Sprite,
+    conf: TowerShootModule
+  ) => void;
+  bulletHitEffect: (
+    tower: Phaser.GameObjects.Sprite,
+    enemy: Phaser.GameObjects.Sprite,
+    otherEnemies: Phaser.GameObjects.Sprite[]
+  ) => boolean;
+};
+
+type TowerUpgradePath = {
+  goldCost: number;
+  name: string;
+  targetShooter: () => TowerShootModule;
+};
+
+type AvailabeUpgrades = TowerUpgradePath[];
+type TowerTypeClass = {
+  behavior: TowerShootModule;
+  upgrades: AvailabeUpgrades;
+};
+function scoreOfEnemyHasFactor(
+  enemy: Phaser.GameObjects.Sprite,
+  prime: number
+): boolean {
+  if (prime < 2) {
+    // early return for faster computation of one-turrets
+    return true;
+  }
+  const hp = enemy.getData("hp");
+  return hp % prime === 0;
 }
