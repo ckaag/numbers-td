@@ -16,6 +16,13 @@ const config: Phaser.Types.Core.GameConfig = {
       default: 'arcade',
       arcade: { debug: false },
     },
+    // Sets game scaling
+    scale: {
+        // Fit to window
+        mode: Phaser.Scale.FIT,
+        // Center vertically and horizontally
+        autoCenter: Phaser.Scale.CENTER_BOTH
+    },
     parent: 'game-container',
     backgroundColor: '#028af8',
     scene: [
